@@ -7,7 +7,7 @@ import sys
 encoding='utf-8'
 server = socket.gethostbyname(socket.gethostname())
 server = 'localhost'
-port = 9999
+port = 9998
 
 OK = 100
 BAD_REQUEST = 200
@@ -49,20 +49,20 @@ class Request():
 
 def getBounds(header):
 	try:
-		lower = int(header['From'])
+		from_ = int(header['From'])
 	except (ValueError, TypeError):
-		return 0, 0
+		return 0
 	except KeyError:
-		lower = 0
+		from_ = 0
 
 	try:
-		upper = int(header['To'])
+		to_ = int(header['To'])
 	except (ValueError, TypeError):
-		return 0, 0
+		return 0
 	except KeyError:
-		upper = None
+		to_ = None
 
-	return lower, upper
+	return (from_, to_)
 
 
 class Server():
@@ -104,9 +104,8 @@ class Server():
 		try:
 			data = []
 
-			lower, upper = getBounds(request.header)
-			print(lower, upper)
-			if lower < 0 or upper is not None and lower > upper:
+			bounds = getBounds(request.header)
+			if bounds[0] < 0 or bounds[1] is not None and bounds[0] > bounds[1]:
 				raise IndexError
 
 
@@ -116,16 +115,16 @@ class Server():
 
 			with open(f'data/{file}') as f:
 				file_len = sum(1 for line in f)
-				if lower is not None and file_len < upper:
+				if bounds[1] is not None and file_len < bounds[1]:
 					raise OutOfBoundsError
 
 				f.seek(0)
 				for i, line in enumerate(f):
-					if upper is None:
-						if i >= lower:
+					if bounds[1] is None:
+						if i >= bounds[0]:
 							data.append(line.rstrip())
 					else:
-						if i >= lower and i < upper:
+						if i >= bounds[0] and i < bounds[1]:
 							data.append(line.rstrip())
 			return (OK, data)
 
@@ -158,7 +157,7 @@ class Server():
 			payload = '\n'.join(payload)
 			return f'{status[stat]}\nLines:{length}\n\n{payload}\n'
 		else:
-			return f'{status[stat]}\n\n'
+			return f'{status[stat]}\n'
 
 
 	def client_handler(self, connection, address):
@@ -175,7 +174,7 @@ class Server():
 
 				status, content = payload
 				response_data = self.construct_response(status, content)
-				print(repr(response_data))
+
 				client_file.write(response_data)
 				client_file.flush()
 
