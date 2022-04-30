@@ -48,15 +48,11 @@ class Request():
 def getBounds(header):
 	try:
 		lower = int(header['From'])
-	except (ValueError, TypeError):
-		return 0, 0
 	except KeyError:
 		lower = 0
 
 	try:
 		upper = int(header['To'])
-	except (ValueError, TypeError):
-		return 0, 0
 	except KeyError:
 		upper = None
 
@@ -101,8 +97,8 @@ class Server():
 	def READ(self, request):
 		try:
 			data = []
-
 			lower, upper = getBounds(request.header)
+
 			if lower < 0 or upper is not None and lower > upper:
 				raise IndexError
 
@@ -131,7 +127,7 @@ class Server():
 		except OutOfBoundsError:
 			return (OUT_OF_BOUNDS, [])
 
-		except (IndexError, IllegalCharacterError, KeyError):
+		except (IndexError, IllegalCharacterError, KeyError, ValueError, TypeError):
 			return (BAD_REQUEST, [])
 
 		except OSError:
