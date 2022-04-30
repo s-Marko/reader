@@ -6,7 +6,9 @@ import sys
 
 encoding='utf-8'
 server = socket.gethostbyname(socket.gethostname())
-port = 9998
+
+server = 'localhost'
+port = 9999
 
 OK = 100
 BAD_REQUEST = 200
@@ -44,15 +46,6 @@ class Request():
 				self.header[name] = value
 			if not line:
 				break
-
-
-def construct_response(stat, payload):
-	length = len(payload)
-	if payload:
-		payload = '\n'.join(payload)
-		return f'{status[stat]}\nLines:{length}\n\n{payload}'
-	else:
-		return f'{status[stat]}'
 
 
 def getBounds(header):
@@ -96,7 +89,7 @@ class Server():
 			with open(f'data/{file}') as f:
 				for line in f:
 					lines += 1
-			return (OK, [lines])
+			return (OK, [str(lines)])
 
 		except (KeyError, IllegalCharacterError):
 			return (BAD_REQUEST, [])
@@ -159,20 +152,31 @@ class Server():
 		else:
 			return (UNKNOWN_METHOD, [])
 
+	def construct_response(self, stat, payload):
+		length = len(payload)
+		if payload:
+			payload = '\n'.join(payload)
+			return f'{status[stat]}\nLines:{length}\n\n{payload}'
+		else:
+			return f'{status[stat]}'
+
 
 	def client_handler(self, connection, address):
+		print(f'[New connection] {address}')
 		while True:
 			message = connection.recv(1024)
 			if message:
 				request = Request(message)
+				print(f'[New request] {request.method} from {address}')
 				data = self.request_handler(request)
 
 				status, payload = data
-				response = construct_response(status, payload)
+				response = self.construct_response(status, payload)
 
 				connection.send(response.encode(encoding))
 				if status == UNKNOWN_METHOD:
 					break
+		print(f'[Connection severed] {address}')
 		connection.close()
 
 
@@ -181,6 +185,7 @@ class Server():
 
 		self.sock.listen(5)
 
+		print('[Starting]')
 		while True:
 			connection, address = self.sock.accept()
 			pid_chld = os.fork()
