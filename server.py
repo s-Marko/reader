@@ -1,6 +1,5 @@
 import socket
 import signal
-import re
 import os
 import sys
 
@@ -34,10 +33,9 @@ class IllegalCharacterError(Exception):
 
 class Request():
 	def __init__(self, method, data):
-		self.method = ''
+		self.method = method
 		self.header = {}
 
-		self.method = method
 		for line in data:
 			line = line.rstrip()
 			if ':' in line:
@@ -105,10 +103,8 @@ class Server():
 			data = []
 
 			lower, upper = getBounds(request.header)
-			print(lower, upper)
 			if lower < 0 or upper is not None and lower > upper:
 				raise IndexError
-
 
 			file = request.header['File']
 			if '\\.' in file:
@@ -166,19 +162,20 @@ class Server():
 		while True:
 			client_file = connection.makefile(mode = 'rw')
 			method = client_file.readline().rstrip()
-			if method:
-				request = Request(method, client_file)
 
+			if method:
+				# new request received
+				request = Request(method, client_file)
 				print(f'[New request] {request.method} from {address}')
 
-				payload = self.request_handler(request)
-
-				status, content = payload
+				status, content = self.request_handler(request)
 				response_data = self.construct_response(status, content)
-				print(repr(response_data))
+
+				# sending response to client
 				client_file.write(response_data)
 				client_file.flush()
 
+				# sever connection on unknown method
 				if status == UNKNOWN_METHOD:
 					break
 
