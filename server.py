@@ -6,139 +6,195 @@ import sys
 
 encoding='utf-8'
 server = socket.gethostbyname(socket.gethostname())
-port = 9000
+port = 9998
 
 OK = 100
 BAD_REQUEST = 200
 OUT_OF_BOUNDS = 201
 NO_FILE = 202
 READ_ERR = 203
+UNKNOWN_METHOD = 204
 
 status = {
 	OK: '100 OK',
 	BAD_REQUEST: '200 Bad Request',
 	OUT_OF_BOUNDS: '201 Bad line number',
 	NO_FILE: '202 No such file',
-	READ_ERR: '203 Read error'
+	READ_ERR: '203 Read error',
+	UNKNOWN_METHOD: '204 Unknown method'
 }
 
-class OutOfBounds(Exception):
+
+class OutOfBoundsError(Exception):
+	pass
+class IllegalCharacterError(Exception):
 	pass
 
 
-def LS():
-	return os.listdir('data')
+class Request():
+	def __init__(self, message):
+		self.method = ''
+		self.header = {}
+		message = message.decode(encoding).splitlines()
 
-def LENGTH(file):
-	try:
-		lines = 0
-		with open(f'data/{file}') as f:
-			for line in f:
-				lines += 1
-		return [lines]
-	except FileNotFoundError:
-		return NO_FILE
-	except OSError:
-		return READ_ERR
-
-def READ(file, from_, to_):
-	try:
-		data = []
-		if from_ < 0 or to_ is not None and from_ > to_:
-			raise OutOfBounds
+		self.method = message[0]
+		for line in message[1:]:
+			if ':' in line:
+				name, value = line.split(':')
+				self.header[name] = value
+			if not line:
+				break
 
 
-		with open(f'data/{file}') as f:
-			for i, line in enumerate(f):
-				if to_ is None:
-					if i >= from_:
-						data.append(line.rstrip())
-				else:
-					if i >= from_ and i < to_:
-						data.append(line.rstrip())
-		return data
-	except FileNotFoundError:
-		return NO_FILE
-	except OutOfBounds:
-		return OUT_OF_BOUNDS
-	except OSError:
-		return READ_ERR
-
-def construct_response(header, data=[]):
-	length = len(data)
-	if data:
-		data = ''.join(f'{d}\n' for d in data)
-		return f'{header}\nLINES:{length}\n\n{data}'
+def construct_response(stat, payload):
+	length = len(payload)
+	if payload:
+		payload = '\n'.join(payload)
+		return f'{status[stat]}\nLines:{length}\n\n{payload}'
 	else:
-		return f'{header}'
-
-def request_handler(message):
-	message = message.decode(encoding)
-	cm = message.splitlines()[0]
-
-	file = re.search('File:(\w+.txt)', message).group(1)
-	from_ = re.search('From:(-?\d+)', message)
-	to_ = re.search('To:(-?\d+)', message)
+		return f'{status[stat]}'
 
 
-	if from_ is not None:
-		from_ = int(from_.group(1))
-	else:
+def getBounds(header):
+	try:
+		from_ = int(header['From'])
+	except (ValueError, TypeError):
+		return 0
+	except KeyError:
 		from_ = 0
 
-	if to_ is not None:
-		to_ = int(to_.group(1))
+	try:
+		to_ = int(header['To'])
+	except (ValueError, TypeError):
+		return 0
+	except KeyError:
+		to_ = None
+
+	return (from_, to_)
 
 
-	if cm == 'LS':
-		data = LS()
-	if cm == 'LENGTH':
-		data = LENGTH(file)
-	if cm == 'READ':
-		data = READ(file, from_, to_)
-	else:
-		data = BAD_REQUEST
+class Server():
+	def __init__(self):
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-	if type(data) is not list:
-		return construct_response(status[data])
-	else:
-		return construct_response(status[OK], data)
+		self.start_server()
 
-def client_handler(connection, address):
-	#print(f'[Connected] {address}')
 
-	while True:
-		msg = connection.recv(1024)
-		if msg:
-			response = request_handler(msg)
-			connection.send(response.encode(encoding))
+	# request methods
+	def LS(self):
+		return (OK, os.listdir('data'))
 
-	connection.close()
 
-def start_server():
-	sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+	def LENGTH(self, request):
+		try:
+			lines = 0
+			file = request.header['File']
+			if '\\.' in file:
+				raise IllegalCharacterError
 
-	sock.bind(('', port))
+			with open(f'data/{file}') as f:
+				for line in f:
+					lines += 1
+			return (OK, [lines])
 
-	sock.listen(5)
+		except (KeyError, IllegalCharacterError):
+			return (BAD_REQUEST, [])
 
-	while True:
-		connection, address = sock.accept()
-		pid_chld = os.fork()
-		if pid_chld == 0:
-			sock.close()
-			client_handler(connection, address)
-			break
+		except FileNotFoundError:
+			return (NO_FILE, [])
+
+		except OSError:
+			return (READ_ERR, [])
+
+
+	def READ(self, request):
+		try:
+			data = []
+
+			bounds = getBounds(request.header)
+			if bounds[0] < 0 or bounds[1] is not None and bounds[0] > bounds[1]:
+				raise IndexError
+
+
+			file = request.header['File']
+			if '\\.' in file:
+				raise IllegalCharacterError
+
+			with open(f'data/{file}') as f:
+				file_len = sum(1 for line in f)
+				if bounds[1] is not None and file_len < bounds[1]:
+					raise OutOfBoundsError
+
+				f.seek(0)
+				for i, line in enumerate(f):
+					if bounds[1] is None:
+						if i >= bounds[0]:
+							data.append(line.rstrip())
+					else:
+						if i >= bounds[0] and i < bounds[1]:
+							data.append(line.rstrip())
+			return (OK, data)
+
+		except FileNotFoundError:
+			return (NO_FILE, [])
+
+		except OutOfBoundsError:
+			return (OUT_OF_BOUNDS, [])
+
+		except (IndexError, IllegalCharacterError, KeyError):
+			return (BAD_REQUEST, [])
+
+		except OSError:
+			return (READ_ERR, [])
+
+
+	def request_handler(self, request):
+		if request.method == 'LS' and not request.header:
+			return self.LS()
+		elif request.method == 'LENGTH':
+			return self.LENGTH(request)
+		elif request.method == 'READ':
+			return self.READ(request)
 		else:
-			pass
+			return (UNKNOWN_METHOD, [])
 
 
+	def client_handler(self, connection, address):
+		while True:
+			message = connection.recv(1024)
+			if message:
+				request = Request(message)
+				data = self.request_handler(request)
+
+				status, payload = data
+				response = construct_response(status, payload)
+
+				connection.send(response.encode(encoding))
+				if status == UNKNOWN_METHOD:
+					break
+		connection.close()
+
+
+	def start_server(self):
+		self.sock.bind(('', port))
+
+		self.sock.listen(5)
+
+		while True:
+			connection, address = self.sock.accept()
+			pid_chld = os.fork()
+			if pid_chld == 0:
+				self.sock.close()
+				self.client_handler(connection, address)
+				break
+			else:
+				pass
 
 if __name__ == '__main__':
-	print(f'Server starting.')
+	#print(f'Server starting.')
 	#sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	#sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 	#sock.bind(('', port))
 
-	start_server()
+	Server()
