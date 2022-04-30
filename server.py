@@ -6,9 +6,8 @@ import sys
 
 encoding='utf-8'
 server = socket.gethostbyname(socket.gethostname())
-
 server = 'localhost'
-port = 9999
+port = 9998
 
 OK = 100
 BAD_REQUEST = 200
@@ -34,13 +33,13 @@ class IllegalCharacterError(Exception):
 
 
 class Request():
-	def __init__(self, message):
+	def __init__(self, method, data):
 		self.method = ''
 		self.header = {}
-		message = message.decode(encoding).splitlines()
 
-		self.method = message[0]
-		for line in message[1:]:
+		self.method = method
+		for line in data:
+			line = line.rstrip()
 			if ':' in line:
 				name, value = line.split(':')
 				self.header[name] = value
@@ -156,50 +155,52 @@ class Server():
 		length = len(payload)
 		if payload:
 			payload = '\n'.join(payload)
-			return f'{status[stat]}\nLines:{length}\n\n{payload}'
+			return f'{status[stat]}\nLines:{length}\n\n{payload}\n'
 		else:
-			return f'{status[stat]}'
+			return f'{status[stat]}\n'
 
 
 	def client_handler(self, connection, address):
 		print(f'[New connection] {address}')
 		while True:
-			message = connection.recv(1024)
-			if message:
-				request = Request(message)
+			client_file = connection.makefile(mode = 'rw')
+			method = client_file.readline().rstrip()
+			if method:
+				request = Request(method, client_file)
+
 				print(f'[New request] {request.method} from {address}')
-				data = self.request_handler(request)
 
-				status, payload = data
-				response = self.construct_response(status, payload)
+				payload = self.request_handler(request)
 
-				connection.send(response.encode(encoding))
+				status, content = payload
+				response_data = self.construct_response(status, content)
+
+				client_file.write(response_data)
+				client_file.flush()
+
 				if status == UNKNOWN_METHOD:
 					break
+
 		print(f'[Connection severed] {address}')
 		connection.close()
 
 
 	def start_server(self):
-		self.sock.bind(('', port))
+		self.sock.bind((server, port))
 
 		self.sock.listen(5)
 
-		print('[Starting]')
+		print(f'[Starting] {server}:{port}')
 		while True:
 			connection, address = self.sock.accept()
 			pid_chld = os.fork()
 			if pid_chld == 0:
 				self.sock.close()
 				self.client_handler(connection, address)
+
 				break
 			else:
 				pass
 
 if __name__ == '__main__':
-	#print(f'Server starting.')
-	#sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	#sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	#sock.bind(('', port))
-
 	Server()
