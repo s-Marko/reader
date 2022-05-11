@@ -61,14 +61,21 @@ def getBounds(header):
 
 class Server():
 	def __init__(self):
+		self.methods = {
+			'LS': self.LS,
+			'LENGTH': self.LENGTH,
+			'READ': self.READ,
+			'SEARCH': self.SEARCH,
+			'SELECT': self.SELECT
+		}
+
 		self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
 		self.start_server()
 
-
 	# request methods
-	def LS(self):
+	def LS(self, request):
 		return (OK, os.listdir('data'))
 
 
@@ -133,15 +140,65 @@ class Server():
 		except OSError:
 			return (READ_ERR, [])
 
+	def __keyword_search(self, keyword, path = ''):
+		if not keyword.startswith('\"') or not keyword.endswith('\"'):
+			raise IllegalCharacterError
+
+		result = {}
+		keyword = keyword.replace('\"', '')
+		if not path:
+			files = [f for f in os.listdir('data') if f.endswith('.txt')]
+		else:
+			files = [path]
+		for file in files:
+			try:
+				result[file] = []
+				with open(f'data/{file}') as f:
+					for line in f:
+						if keyword in line:
+							result[file].append(line.rstrip())
+			except (FileNotFoundError, OSError) as e:
+				# skarede
+				if path:
+					raise e
+		return result
+
+	def SEARCH(self, request):
+		try:
+			result = self.__keyword_search(request.header['String'])
+		except (KeyError, IllegalCharacterError):
+			return (BAD_REQUEST, [])
+
+		data = []
+		for key, value in result.items():
+			print(key, value)
+			if value:
+				data.append(key)
+		return (OK, data)
+
+	def SELECT(self, request):
+		try:
+			result = self.__keyword_search(request.header['String'], request.header['File'])
+		except (KeyError, IllegalCharacterError):
+			return (BAD_REQUEST, [])
+		except FileNotFoundError:
+			return (NO_FILE , [])
+		except OSError:
+			return (READ_ERR, [])
+
+		data = []
+		for key, value in result.items():
+			if value:
+				data.extend(value)
+		return (OK, data)
 
 	def request_handler(self, request):
-		if request.method == 'LS' and not request.header:
-			return self.LS()
-		elif request.method == 'LENGTH':
-			return self.LENGTH(request)
-		elif request.method == 'READ':
-			return self.READ(request)
-		else:
+		self.methods[request.method](request)
+		try:
+			# toto by ma vobec nenapadlo spravit
+			# asi mam este traumu z C-ckovych function pointerov :)
+			return self.methods[request.method](request)
+		except:
 			return (UNKNOWN_METHOD, [])
 
 	def construct_response(self, stat, payload):
