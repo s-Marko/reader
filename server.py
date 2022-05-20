@@ -193,7 +193,7 @@ class Server():
 		return (OK, data)
 
 	def request_handler(self, request):
-		self.methods[request.method](request)
+		#self.methods[request.method](request)
 		try:
 			# toto by ma vobec nenapadlo spravit
 			# asi mam este traumu z C-ckovych function pointerov :)
